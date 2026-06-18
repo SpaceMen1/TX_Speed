@@ -1,84 +1,82 @@
 #!/bin/sh
 
-# Ссылка на оригинальный патчер от 4n0n4
+# Ссылка на оригинальный патчер из твоего файла
 PATCHER_URL="https://raw.githubusercontent.com/4n0n4/mt7981_factory_txpwr_patch/refs/heads/main/txpwr.sh"
 PATCHER_PATH="/tmp/txpwr.sh"
 DUMP_FILE="/tmp/factory_dump.bin"
 BACKUP_FILE="/tmp/factory_original_backup.bin"
 
-echo "=== Автоматический буст Wi-Fi на максимум ==="
+echo "=== Накатываем сбалансированный максимум по частотам ==="
 
-# 1. Скачиваем оригинальный скрипт-патчер
-echo "Скачиваю оригинальный патчер..."
+# 1. Скачиваем оригинальный скрипт
+echo "Скачиваю оригинальный скрипт..."
 wget --no-check-certificate -O "$PATCHER_PATH" "$PATCHER_URL"
 
 if [ $? -ne 0 ] || [ ! -s "$PATCHER_PATH" ]; then
-    echo "Ошибка: Не получилось скачать оригинальный файл txpwr.sh!"
-    echo "Возможные причины:"
-    echo "1. На роутере нет интернета."
-    echo "2. Не установлен пакет для поддержки HTTPS."
-    echo "3. Сильно сбито системное время устройства."
+    echo "Ошибка: Не получилось скачать txpwr.sh!"
     exit 1
 fi
 
-chmod +x "$PATCHER_PATH"
-echo "Оригинальный скрипт успешно скачан."
+# 2. Инжектим наш пресет прямо в начало файла (чтобы скрипт его точно прочитал)
+echo "Добавляем пресет custom_max со стабильными максимумами..."
+{
+    echo 'preset_custom_max_2g="29 29 29 29"'
+    echo 'preset_custom_max_5g="29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29"'
+    echo 'preset_custom_max_6g="24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24 24"'
+    cat "$PATCHER_PATH"
+} > /tmp/txpwr_mod.sh
 
-# 2. Ищем раздел Factory в памяти роутера
+mv /tmp/txpwr_mod.sh "$PATCHER_PATH"
+chmod +x "$PATCHER_PATH"
+
+# 3. Ищем раздел Factory в памяти
 MTD_DEV=$(grep -i '"Factory"' /proc/mtd | cut -d: -f1)
 if [ -z "$MTD_DEV" ]; then
-    echo "Ошибка: Раздел Factory не найден в системе роутера!"
+    echo "Ошибка: Раздел Factory не найден!"
     exit 1
 fi
-echo "Нашли целевой раздел памяти: /dev/$MTD_DEV"
 
-# 3. Делаем безопасный заводской бэкап
+# 4. Делаем бэкап и копию для работы
 echo "Сохраняю оригинальный бэкап в $BACKUP_FILE..."
 dd if="/dev/$MTD_DEV" of="$BACKUP_FILE" bs=1M 2>/dev/null
-
-# Копируем файл для проведения модификации
 cp "$BACKUP_FILE" "$DUMP_FILE"
 
-# 4. Запускаем патч с самым мощным пресетом wr3000p
-echo "Применяю самый мощный профиль wr3000p на максимум..."
-echo "y" | sh "$PATCHER_PATH" -f "$DUMP_FILE" -p wr3000p -b all -L ru
+# 5. Запускаем патч с нашим новым пресетом
+echo "Применяю профиль custom_max..."
+echo "y" | sh "$PATCHER_PATH" -f "$DUMP_FILE" -p custom_max -b all -L ru
 
-# 5. Обходим защиту записи на чип памяти
-echo "Пытаюсь снять защиту записи с раздела Factory..."
-
-# Проверяем, какой менеджер пакетов используется в системе (новый apk или старый opkg)
+# 6. Ставим mtd-rw для обхода защиты записи
+echo "Снимаю защиту записи с чипа памяти..."
 if command -v apk >/dev/null 2>&1; then
-    echo "Обнаружил пакетный менеджер apk. Ставлю утилиту разблокировки..."
     apk update && apk add kmod-mtd-rw
 elif command -v opkg >/dev/null 2>&1; then
-    echo "Обнаружил пакетный менеджер opkg. Ставлю утилиту разблокировки..."
     opkg update && opkg install kmod-mtd-rw
-else
-    echo "Пакетные менеджеры не найдены, пробую активировать встроенный модуль..."
 fi
 
-# Включаем модуль обхода защиты памяти
 insmod mtd-rw i_want_a_brick=1 2>/dev/null
 
-# 6. Зашиваем прокачанный файл обратно в чип памяти
-echo "Записываю измененный Factory обратно в роутер..."
+# 7. Зашиваем измененный дамп обратно в роутер
+echo "Записываю обновленный Factory обратно в память..."
 mtd write "$DUMP_FILE" Factory
 
 if [ $? -eq 0 ]; then
-    echo "Накатываю правильные настройки каналов для 5 ГГц..."
+    echo "Выставляю регион Панама (PA) и открываю каналы..."
+    
+    uci set wireless.radio0.country='PA'
+    uci set wireless.radio1.country='PA'
+    
     uci set wireless.radio1.channel='auto'
     uci set wireless.radio1.channels='36 40 44 48 149 153 157 161'
+    
     uci commit wireless
     wifi reload
 
     echo "==========================================="
-    echo "=== ВСЁ ПРОШЛО УСПЕШНО! ==="
-    echo "Максимальная мощность и каналы настроены."
-    echo "Перезагружаю роутер для активации настроек..."
+    echo "Все готово! Роутер уходит на перезагрузку."
     echo "==========================================="
-    sleep 3
+    sleep 2
     reboot
 else
-    echo "Блин, что-то пошло не так при финальной записи в память роутера!"
+    echo "Что-то пошло не так при финальной записи в память!"
     exit 1
 fi
