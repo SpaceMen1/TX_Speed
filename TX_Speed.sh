@@ -30,7 +30,7 @@ mv /tmp/txpwr_mod.sh "$PATCHER_PATH"
 chmod +x "$PATCHER_PATH"
 
 # 3. Ищем раздел Factory в памяти
-MTD_DEV=$(grep -i '"Factory"' /proc/mtd | cut -d: -f1)
+MTD_DEV=$(grep -i '"factory"' /proc/mtd | cut -d: -f1)
 if [ -z "$MTD_DEV" ]; then
     echo "Ошибка: Раздел Factory не найден!"
     exit 1
