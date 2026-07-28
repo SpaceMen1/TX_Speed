@@ -57,7 +57,7 @@ insmod mtd-rw i_want_a_brick=1 2>/dev/null
 
 # 7. Зашиваем измененный дамп обратно в роутер
 echo "Записываю обновленный Factory обратно в память..."
-mtd write "$DUMP_FILE" Factory
+mtd write "$DUMP_FILE" factory
 
 if [ $? -eq 0 ]; then
     echo "Выставляю регион Панама (PA) и открываю каналы..."
