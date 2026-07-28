@@ -30,7 +30,7 @@ mv /tmp/txpwr_mod.sh "$PATCHER_PATH"
 chmod +x "$PATCHER_PATH"
 
 # 3. Ищем раздел Factory в памяти
-MTD_DEV=$(grep -i '"factory"' /proc/mtd | cut -d: -f1)
+MTD_DEV=$(grep -i '"Factory"' /proc/mtd | cut -d: -f1)
 if [ -z "$MTD_DEV" ]; then
     echo "Ошибка: Раздел Factory не найден!"
     exit 1
@@ -57,7 +57,7 @@ insmod mtd-rw i_want_a_brick=1 2>/dev/null
 
 # 7. Зашиваем измененный дамп обратно в роутер
 echo "Записываю обновленный Factory обратно в память..."
-mtd write "$DUMP_FILE" factory
+mtd write "$DUMP_FILE" Factory
 
 if [ $? -eq 0 ]; then
     echo "Выставляю регион Панама (PA) и открываю каналы..."
