@@ -5,9 +5,9 @@ PATCHER_PATH="/tmp/txpwr.sh"
 DUMP_FILE="/tmp/factory_dump.bin"
 BACKUP_FILE="/tmp/factory_original_backup.bin"
 
-echo "=== Финальный боевой разгон RAX3000M / RAX3000ME (MT7981 / OpenWrt 25.12) ==="
+echo "=== Максимальный разгон RAX3000M / RAX3000ME (MT7981 / OpenWrt 25.12) ==="
 
-# 1. Скачивание оригинального патчера
+# 1. Скачивание патчера
 echo "[1/7] Скачиваю скрипт-патчер..."
 wget --no-check-certificate -O "$PATCHER_PATH" "$PATCHER_URL"
 
@@ -18,12 +18,15 @@ fi
 
 chmod +x "$PATCHER_PATH"
 
-# 2. Модификация родного пресета rax3000me под ровные 29 dBm
-echo "[2/7] Калибруем пресет rax3000me под ровные максимумы..."
-sed -i 's/preset_rax3000me_2g=".*"/preset_rax3000me_2g="29 29 29 29"/' "$PATCHER_PATH"
+# 2. Исправление синтаксиса и внедрение 29 HEX строго перед вызовом MAIN
+echo "[2/7] Внедряем максимальные значения (29 HEX) перед выполнением патчера..."
 
-P5G="29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29"
-sed -i "s/preset_rax3000me_5g=\".*\"/preset_rax3000me_5g=\"$P5G\"/" "$PATCHER_PATH"
+# Исправление потенциального вылета printf в txpwr.sh
+sed -i 's/printf "\\$oct"/printf "%b" "\\$oct"/' "$PATCHER_PATH"
+
+# Вставка новых значений ровно перед блоком MAIN
+sed -i '/# =================== MAIN ===================/i preset_rax3000me_2g="29 29 29 29"' "$PATCHER_PATH"
+sed -i '/# =================== MAIN ===================/i preset_rax3000me_5g="29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29"' "$PATCHER_PATH"
 
 # 3. Поиск и бэкап MTD раздела Factory
 MTD_DEV=$(grep -i '"factory"' /proc/mtd | cut -d: -f1)
@@ -32,8 +35,8 @@ if [ -z "$MTD_DEV" ]; then
     exit 1
 fi
 
-echo "[3/7] Создаю резервную копию Factory в $BACKUP_FILE..."
-dd if="/dev/$MTD_DEV" of="$BACKUP_FILE" bs=1M 2>/dev/null
+echo "[3/7] Создаю резервную копию Factory ($MTD_DEV) в $BACKUP_FILE..."
+dd if="/dev/$MTD_DEV" of="$BACKUP_FILE" bs=64k 2>/dev/null
 
 if [ ! -s "$BACKUP_FILE" ]; then
     echo "Ошибка: Не удалось сделать бэкап раздела Factory!"
@@ -43,7 +46,7 @@ fi
 cp "$BACKUP_FILE" "$DUMP_FILE"
 
 # 4. Пропатчивание дампа пресетом rax3000me
-echo "[4/7] Применяю калибровки rax3000me к дампу..."
+echo "[4/7] Применяем калибровки к дампу..."
 echo "y" | sh "$PATCHER_PATH" -f "$DUMP_FILE" -p rax3000me -b all -L ru
 
 if [ $? -ne 0 ]; then
@@ -51,58 +54,60 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 5. Снятие защиты записи (поддержка apk в OpenWrt 25.12 и opkg)
-echo "[5/7] Разблокирую запись в флеш-память..."
+# 5. Снятие защиты записи
+echo "[5/7] Разблокирую запись во флеш-память..."
 if command -v apk >/dev/null 2>&1; then
-    apk update && apk add kmod-mtd-rw
+    apk update && apk add kmod-mtd-rw 2>/dev/null
 elif command -v opkg >/dev/null 2>&1; then
-    opkg update && opkg install kmod-mtd-rw
+    opkg update && opkg install kmod-mtd-rw 2>/dev/null
 fi
 
 modprobe mtd-rw i_want_a_brick=1 2>/dev/null || insmod mtd-rw i_want_a_brick=1 2>/dev/null
 
 # 6. Прошивка патченного дампа в чип
-echo "[6/7] Записываю прошитый Factory в память роутера..."
-mtd write "$DUMP_FILE" factory
+echo "[6/7] Записываю пропатченный Factory в /dev/$MTD_DEV..."
+mtd write "$DUMP_FILE" "$MTD_DEV"
 
 if [ $? -ne 0 ]; then
     echo "КРИТИЧЕСКАЯ ОШИБКА при записи в MTD! Не перезагружай роутер!"
     exit 1
 fi
 
-# 7. Комплексная оптимизация OpenWrt (UCI)
-echo "[7/7] Накатываем ультимативный тюнинг сети и Wi-Fi..."
+# 7. Тюнинг сети и Wi-Fi (UCI)
+echo "[7/7] Настраиваем Wi-Fi (80 МГц) и ускорение..."
 
-# Снятие региональных рамок (Панама)
+# Регион Панама
 uci set wireless.radio0.country='PA'
 uci set wireless.radio1.country='PA'
 
-# 5 ГГц: 160 МГц + автовыбор самого свободного канала из безопасного блока
-uci set wireless.radio1.htmode='HE80'
-uci set wireless.radio1.channel='auto'
-uci set wireless.radio1.channels='36 40 44 48'
+# 2.4 ГГц
+uci set wireless.radio0.channel='auto'
 
-# Защита от соседских помех (BSS Coloring)
+# 5 ГГц: HE80 + канал 36
+uci set wireless.radio1.htmode='HE80'
+uci set wireless.radio1.channel='36'
+
+# BSS Coloring
 uci set wireless.radio0.he_bss_color='12'
 uci set wireless.radio1.he_bss_color='12'
 
-# Фокусировка сигнала на устройствах (Beamforming)
+# Beamforming
 uci set wireless.radio0.tx_beamforming='1'
 uci set wireless.radio0.rx_beamforming='1'
 uci set wireless.radio1.tx_beamforming='1'
 uci set wireless.radio1.rx_beamforming='1'
 uci set wireless.radio1.mu_beamforming='1'
 
-# Защита от медленных клиентов (Airtime Fairness)
+# Airtime Fairness
 uci set wireless.radio0.airtime_fairness='1'
 uci set wireless.radio1.airtime_fairness='1'
 
-# Железное ускорение WED и распределение нагрузки по ядрам
+# Ускорение сети
 uci set firewall.@defaults[0].flow_offloading='1'
 uci set firewall.@defaults[0].flow_offloading_hw='1'
 uci set network.globals.packet_steering='1'
 
-# Оптимизация интерфейсов (Multicast2Unicast + Быстрый роуминг 802.11k/v)
+# Оптимизация клиентов
 for iface in $(uci show wireless | grep '=wifi-iface' | cut -d'.' -f2 | cut -d'=' -f1); do
     uci set wireless.${iface}.multicast_to_unicast='1'
     uci set wireless.${iface}.ieee80211k='1'
@@ -110,14 +115,14 @@ for iface in $(uci show wireless | grep '=wifi-iface' | cut -d'.' -f2 | cut -d'=
     uci set wireless.${iface}.bss_transition='1'
 done
 
-# Применение и сохранение всех параметров
+# Применение конфигурации
 uci commit wireless
 uci commit firewall
 uci commit network
 
 echo "=========================================================="
-echo " Все готово! Выжали 100% из RAX3000M / RAX3000ME на 25.12."
-echo " Перезагружаю роутер..."
+echo " Все готово! Значения 29 HEX успешно прописаны в Factory."
+echo " Перезагрузка через 3 секунды..."
 echo "=========================================================="
 sleep 3
 reboot
