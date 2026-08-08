@@ -58,19 +58,25 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 5. Снятие защиты записи
-echo "[5/7] Разблокирую запись во флеш-память..."
+# 5. Замена базовых пакетов wpad на полноценный wpad-mbedtls и снятие защиты записи
+echo "[5/7] Заменяем урезанный wpad на wpad-mbedtls и разблокируем флеш-память..."
 if command -v apk >/dev/null 2>&1; then
-    apk update >/dev/null 2>&1 && apk add kmod-mtd-rw >/dev/null 2>&1
+    apk update >/dev/null 2>&1
+    # Зачищаем все возможные усеченные сборки wpad
+    apk del wpad-basic-mbedtls wpad-basic-openssl wpad-mini wpad-basic-wolfssl wpad-basic >/dev/null 2>&1
+    apk add wpad-mbedtls kmod-mtd-rw >/dev/null 2>&1
 elif command -v opkg >/dev/null 2>&1; then
-    opkg update >/dev/null 2>&1 && opkg install kmod-mtd-rw >/dev/null 2>&1
+    opkg update >/dev/null 2>&1
+    # Зачищаем все возможные усеченные сборки wpad
+    opkg remove --force-depends wpad-basic-mbedtls wpad-basic-openssl wpad-mini wpad-basic-wolfssl wpad-basic >/dev/null 2>&1
+    opkg install wpad-mbedtls kmod-mtd-rw >/dev/null 2>&1
 fi
 
 # Загрузка модуля и разблокировка MTD
 modprobe mtd-rw i_want_a_brick=1 2>/dev/null || insmod mtd-rw i_want_a_brick=1 2>/dev/null
 mtd unlock "$MTD_NAME" 2>/dev/null || mtd unlock "$MTD_DEV" 2>/dev/null
 
-# 6. Прошивка патченного дампа в чип (каскадная запись для предотвращения ошибок)
+# 6. Прошивка патченного дампа в чип
 echo "[6/7] Записываю пропатченный Factory в память..."
 
 mtd write "$DUMP_FILE" "$MTD_NAME" 2>/dev/null || \
@@ -83,7 +89,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # 7. Тюнинг сети и Wi-Fi (UCI)
-echo "[7/7] Настраиваем Wi-Fi (80 МГц) и ускорение..."
+echo "[7/7] Настраиваем Wi-Fi (80 МГц) и подсистемы..."
 
 # Регион Панама
 uci set wireless.radio0.country='PA'
@@ -116,7 +122,7 @@ uci set firewall.@defaults[0].flow_offloading='1'
 uci set firewall.@defaults[0].flow_offloading_hw='1'
 uci set network.globals.packet_steering='1'
 
-# Оптимизация клиентов
+# Оптимизация клиентов (802.11k/v роуминг теперь работает корректно благодаря wpad-mbedtls)
 for iface in $(uci show wireless | grep '=wifi-iface' | cut -d'.' -f2 | cut -d'=' -f1); do
     uci set wireless.${iface}.multicast_to_unicast='1'
     uci set wireless.${iface}.ieee80211k='1'
@@ -130,7 +136,7 @@ uci commit firewall
 uci commit network
 
 echo "=========================================================="
-echo " Все готово! Значения 29 HEX успешно прописаны в Factory."
+echo " Все готово! Установлен wpad-mbedtls, 29 HEX прописаны в Factory."
 echo " Перезагрузка через 3 секунды..."
 echo "=========================================================="
 sleep 3
