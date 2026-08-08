@@ -26,7 +26,7 @@ P5G="29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29"
 sed -i "s/preset_rax3000me_5g=\".*\"/preset_rax3000me_5g=\"$P5G\"/" "$PATCHER_PATH"
 
 # 3. Поиск и бэкап MTD раздела Factory
-MTD_DEV=$(grep -i '"Factory"' /proc/mtd | cut -d: -f1)
+MTD_DEV=$(grep -i '"factory"' /proc/mtd | cut -d: -f1)
 if [ -z "$MTD_DEV" ]; then
     echo "Ошибка: Раздел Factory не найден в /proc/mtd!"
     exit 1
@@ -63,7 +63,7 @@ modprobe mtd-rw i_want_a_brick=1 2>/dev/null || insmod mtd-rw i_want_a_brick=1 2
 
 # 6. Прошивка патченного дампа в чип
 echo "[6/7] Записываю прошитый Factory в память роутера..."
-mtd write "$DUMP_FILE" Factory
+mtd write "$DUMP_FILE" factory
 
 if [ $? -ne 0 ]; then
     echo "КРИТИЧЕСКАЯ ОШИБКА при записи в MTD! Не перезагружай роутер!"
@@ -78,7 +78,7 @@ uci set wireless.radio0.country='PA'
 uci set wireless.radio1.country='PA'
 
 # 5 ГГц: 160 МГц + автовыбор самого свободного канала из безопасного блока
-uci set wireless.radio1.htmode='HE160'
+uci set wireless.radio1.htmode='HE80'
 uci set wireless.radio1.channel='auto'
 uci set wireless.radio1.channels='36 40 44 48'
 
