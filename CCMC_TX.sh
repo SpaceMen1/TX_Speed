@@ -21,21 +21,25 @@ chmod +x "$PATCHER_PATH"
 # 2. Исправление синтаксиса и внедрение 29 HEX строго перед вызовом MAIN
 echo "[2/7] Внедряем максимальные значения (29 HEX) перед выполнением патчера..."
 
-# Исправление потенциального вылета printf в txpwr.sh
+# Исправление вылета printf в txpwr.sh
 sed -i 's/printf "\\$oct"/printf "%b" "\\$oct"/' "$PATCHER_PATH"
 
-# Вставка новых значений ровно перед блоком MAIN
+# Вставка новых значений перед блоком MAIN
 sed -i '/# =================== MAIN ===================/i preset_rax3000me_2g="29 29 29 29"' "$PATCHER_PATH"
 sed -i '/# =================== MAIN ===================/i preset_rax3000me_5g="29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29 29"' "$PATCHER_PATH"
 
 # 3. Поиск и бэкап MTD раздела Factory
-MTD_DEV=$(grep -i '"factory"' /proc/mtd | cut -d: -f1)
+MTD_NAME=$(grep -i '"factory"' /proc/mtd | head -n1 | cut -d'"' -f2)
+MTD_DEV=$(grep -i '"factory"' /proc/mtd | head -n1 | cut -d: -f1)
+
 if [ -z "$MTD_DEV" ]; then
     echo "Ошибка: Раздел Factory не найден в /proc/mtd!"
     exit 1
 fi
 
-echo "[3/7] Создаю резервную копию Factory ($MTD_DEV) в $BACKUP_FILE..."
+[ -z "$MTD_NAME" ] && MTD_NAME="Factory"
+
+echo "[3/7] Создаю резервную копию Factory ($MTD_DEV / $MTD_NAME) в $BACKUP_FILE..."
 dd if="/dev/$MTD_DEV" of="$BACKUP_FILE" bs=64k 2>/dev/null
 
 if [ ! -s "$BACKUP_FILE" ]; then
@@ -57,19 +61,24 @@ fi
 # 5. Снятие защиты записи
 echo "[5/7] Разблокирую запись во флеш-память..."
 if command -v apk >/dev/null 2>&1; then
-    apk update && apk add kmod-mtd-rw 2>/dev/null
+    apk update >/dev/null 2>&1 && apk add kmod-mtd-rw >/dev/null 2>&1
 elif command -v opkg >/dev/null 2>&1; then
-    opkg update && opkg install kmod-mtd-rw 2>/dev/null
+    opkg update >/dev/null 2>&1 && opkg install kmod-mtd-rw >/dev/null 2>&1
 fi
 
+# Загрузка модуля и разблокировка MTD
 modprobe mtd-rw i_want_a_brick=1 2>/dev/null || insmod mtd-rw i_want_a_brick=1 2>/dev/null
+mtd unlock "$MTD_NAME" 2>/dev/null || mtd unlock "$MTD_DEV" 2>/dev/null
 
-# 6. Прошивка патченного дампа в чип
-echo "[6/7] Записываю пропатченный Factory в /dev/$MTD_DEV..."
-mtd write "$DUMP_FILE" "$MTD_DEV"
+# 6. Прошивка патченного дампа в чип (каскадная запись для предотвращения ошибок)
+echo "[6/7] Записываю пропатченный Factory в память..."
+
+mtd write "$DUMP_FILE" "$MTD_NAME" 2>/dev/null || \
+mtd write "$DUMP_FILE" "$MTD_DEV" 2>/dev/null || \
+dd if="$DUMP_FILE" of="/dev/mtdblock${MTD_DEV#mtd}" bs=64k 2>/dev/null
 
 if [ $? -ne 0 ]; then
-    echo "КРИТИЧЕСКАЯ ОШИБКА при записи в MTD! Не перезагружай роутер!"
+    echo "КРИТИЧЕСКАЯ ОШИБКА при записи в MTD!"
     exit 1
 fi
 
